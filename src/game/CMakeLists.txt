@@ -96,8 +96,6 @@ if(SCRIPT_LIB_ELUNA)
     source_group("Eluna" FILES ${SRC_GRP_ELUNA})
 endif()
 
-if(PLAYERBOTS)
-
 #Base files
 file(GLOB Playerbot_Source ${CMAKE_SOURCE_DIR}/src/modules/Bots/playerbot/*.cpp ${CMAKE_SOURCE_DIR}/src/modules/Bots/playerbot/*.h)
 source_group("Player Bot" FILES ${Playerbot_Source})
@@ -182,8 +180,6 @@ LIST(APPEND SRC_GRP_BOTS ${Playerbot_Warrior})
 
 configure_file(${CMAKE_SOURCE_DIR}/src/modules/Bots/playerbot/aiplayerbot.conf.dist.in ${CMAKE_CURRENT_BINARY_DIR}/aiplayerbot.conf.dist)
 
-endif()
-
 configure_file(AuctionHouseBot/ahbot.conf.dist.in ${CMAKE_CURRENT_BINARY_DIR}/AuctionHouseBot/ahbot.conf.dist)
 
 if(BUILD_TOOLS)
@@ -239,7 +235,7 @@ add_library(game STATIC
     ${SRC_GRP_WARDEN_MODULES}
     ${SRC_GRP_WORLD_HANDLERS}
     $<$<BOOL:${SCRIPT_LIB_ELUNA}>:${SRC_GRP_ELUNA}>
-    $<$<BOOL:${PLAYERBOTS}>:${SRC_GRP_BOTS}>
+    ${SRC_GRP_BOTS}
 )
 
 target_include_directories(game
@@ -265,18 +261,16 @@ target_include_directories(game
             ${CMAKE_SOURCE_DIR}/src/modules/Eluna/hooks
             ${CMAKE_SOURCE_DIR}/src/modules/Eluna/methods/Mangos
         >
-        $<$<BOOL:${PLAYERBOTS}>:
-            ${CMAKE_SOURCE_DIR}/src/modules/Bots
-            ${CMAKE_SOURCE_DIR}/src/modules/Bots/playerbot
-            ${CMAKE_SOURCE_DIR}/src/modules/Bots/ahbot
-        >
+        ${CMAKE_SOURCE_DIR}/src/modules/Bots
+        ${CMAKE_SOURCE_DIR}/src/modules/Bots/playerbot
+        ${CMAKE_SOURCE_DIR}/src/modules/Bots/ahbot
 )
 
 target_compile_definitions(game
     PUBLIC
         $<$<BOOL:${SOAP}>:ENABLE_SOAP>
         $<$<BOOL:${SCRIPT_LIB_SD3}>:ENABLE_SD3>
-        $<$<BOOL:${PLAYERBOTS}>:ENABLE_PLAYERBOTS>
+        ENABLE_PLAYERBOTS
         $<$<BOOL:${SCRIPT_LIB_ELUNA}>:ENABLE_ELUNA ELUNA_EXPANSION=3 ELUNA_MANGOS>
 )
 
@@ -307,7 +301,5 @@ install(
 )
 endif()
 
-if(PLAYERBOTS)
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/aiplayerbot.conf.dist
-    DESTINATION ${CONF_INSTALL_DIR})
-endif()
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/aiplayerbot.conf.dist
+DESTINATION ${CONF_INSTALL_DIR})

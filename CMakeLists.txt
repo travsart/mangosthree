@@ -46,10 +46,10 @@ option(BUILD_TOOLS          "Build the map/vmap/mmap extractors"            ON)
 option(USE_STORMLIB         "Use StormLib for reading MPQs"                 ON)
 option(SCRIPT_LIB_ELUNA     "Compile with support for Eluna scripts"        ON)
 option(SCRIPT_LIB_SD3       "Compile with support for ScriptDev3 scripts"   ON)
-option(PLAYERBOTS           "Enable Player Bots"                            OFF)
+option(PLAYERBOTS           "Enable Player Bots"                            On)
 option(SOAP                 "Enable remote access via SOAP"                 OFF)
 option(PCH                  "Enable precompiled headers"                    ON)
-option(DEBUG                "Enable debug build (only on non IDEs)"         OFF)
+option(DEBUG                "Enable debug build (only on non IDEs)"         On)
 #==================================================================================
 message("")
 message(
