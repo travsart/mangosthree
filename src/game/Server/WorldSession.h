@@ -917,9 +917,7 @@ class WorldSession
         void HandleSetActiveVoiceChannel(WorldPacket& recv_data);
         void HandleSetTaxiBenchmarkOpcode(WorldPacket& recv_data);
 
-#ifdef ENABLE_PLAYERBOTS
         void HandleBotPackets();
-#endif
 
         // for Warden
         uint16 GetClientBuild() const { return _build; }

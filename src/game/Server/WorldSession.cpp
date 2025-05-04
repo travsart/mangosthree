@@ -49,9 +49,7 @@
 #ifdef ENABLE_ELUNA
 #include "LuaEngine.h"
 #endif /*ENABLE_ELUNA*/
-#ifdef ENABLE_PLAYERBOTS
-//#include "playerbot.h"
-#endif
+#include "playerbot.h"
 
 // Warden
 #include "WardenWin.h"
@@ -165,18 +163,16 @@ char const* WorldSession::GetPlayerName() const
 /// Send a packet to the client
 void WorldSession::SendPacket(WorldPacket const* packet)
 {
-#ifdef ENABLE_PLAYERBOTS
-    //if (GetPlayer()) {
-    //    if (GetPlayer()->GetPlayerbotAI())
-    //    {
-    //        GetPlayer()->GetPlayerbotAI()->HandleBotOutgoingPacket(*packet);
-    //    }
-    //    else if (GetPlayer()->GetPlayerbotMgr())
-    //    {
-    //        GetPlayer()->GetPlayerbotMgr()->HandleMasterOutgoingPacket(*packet);
-    //    }
-    //}
-#endif
+    if (GetPlayer()) {
+       if (GetPlayer()->GetPlayerbotAI())
+       {
+           GetPlayer()->GetPlayerbotAI()->HandleBotOutgoingPacket(*packet);
+       }
+       else if (GetPlayer()->GetPlayerbotMgr())
+       {
+           GetPlayer()->GetPlayerbotMgr()->HandleMasterOutgoingPacket(*packet);
+       }
+    }
 
     if (!m_Socket)
     {
@@ -292,12 +288,10 @@ bool WorldSession::Update(PacketFilter& updater)
 
                     // lag can cause STATUS_LOGGEDIN opcodes to arrive after the player started a transfer
 
-#ifdef ENABLE_PLAYERBOTS
-              /*      if (_player && _player->GetPlayerbotMgr())
+                    if (_player && _player->GetPlayerbotMgr())
                     {
                         _player->GetPlayerbotMgr()->HandleMasterIncomingPacket(*packet);
-                    }*/
-#endif
+                    }
                     break;
                 case STATUS_LOGGEDIN_OR_RECENTLY_LOGGEDOUT:
                     if (!_player && !m_playerRecentlyLogout)
@@ -380,12 +374,10 @@ bool WorldSession::Update(PacketFilter& updater)
         delete packet;
     }
 
-#ifdef ENABLE_PLAYERBOTS
-    //if (GetPlayer() && GetPlayer()->GetPlayerbotMgr())
-    //{
-    //    GetPlayer()->GetPlayerbotMgr()->UpdateSessions(0);
-    //}
-#endif
+    if (GetPlayer() && GetPlayer()->GetPlayerbotMgr())
+    {
+       GetPlayer()->GetPlayerbotMgr()->UpdateSessions(0);
+    }
 
     ///- Cleanup socket pointer if need
     if (m_Socket && m_Socket->IsClosed())
@@ -421,7 +413,6 @@ bool WorldSession::Update(PacketFilter& updater)
     return true;
 }
 
-#ifdef ENABLE_PLAYERBOTS
 void WorldSession::HandleBotPackets()
 {
     WorldPacket* packet;
@@ -432,7 +423,6 @@ void WorldSession::HandleBotPackets()
         delete packet;
     }
 }
-#endif
 
 /// %Log the player out
 void WorldSession::LogoutPlayer(bool Save)
@@ -448,12 +438,10 @@ void WorldSession::LogoutPlayer(bool Save)
 
     if (_player)
     {
-#ifdef ENABLE_PLAYERBOTS
-  /*      if (GetPlayer()->GetPlayerbotMgr())
+        if (GetPlayer()->GetPlayerbotMgr())
         {
             GetPlayer()->GetPlayerbotMgr()->LogoutAllBots();
-        }*/
-#endif
+        }
 
         sLog.outChar("Account: %d (IP: %s) Logout Character:[%s] (guid: %u)", GetAccountId(), GetRemoteAddress().c_str(), _player->GetName() , _player->GetGUIDLow());
 
@@ -462,13 +450,11 @@ void WorldSession::LogoutPlayer(bool Save)
             DoLootRelease(lootGuid);
         }
 
-#ifdef ENABLE_PLAYERBOTS
-        //if (_player->GetPlayerbotMgr())
-        //{
-        //    _player->GetPlayerbotMgr()->LogoutAllBots();
-        //}
-        //sRandomPlayerbotMgr.OnPlayerLogout(_player);
-#endif
+        if (_player->GetPlayerbotMgr())
+        {
+           _player->GetPlayerbotMgr()->LogoutAllBots();
+        }
+        sRandomPlayerbotMgr.OnPlayerLogout(_player);
 
         ///- If the player just died before logging out, make him appear as a ghost
         // FIXME: logout must be delayed in case lost connection with client in time of combat
@@ -563,18 +549,16 @@ void WorldSession::LogoutPlayer(bool Save)
         ///- Reset the online field in the account table
         // no point resetting online in character table here as Player::SaveToDB() will set it to 1 since player has not been removed from world at this stage
         // No SQL injection as AccountID is uint32
-#ifdef ENABLE_PLAYERBOTS
-        //if (!GetPlayer()->GetPlayerbotAI())
-        //{
-        //    static SqlStatementID id;
-        //    // playerbot mod
-        //    if (!_player->GetPlayerbotAI())
-        //    {
-        //        SqlStatement stmt = LoginDatabase.CreateStatement(id, "UPDATE account SET active_realm_id = ? WHERE id = ?");
-        //        stmt.PExecute(uint32(0), GetAccountId());
-        //    }
-        //}
-#else
+        if (!GetPlayer()->GetPlayerbotAI())
+        {
+           static SqlStatementID id;
+           // playerbot mod
+           if (!_player->GetPlayerbotAI())
+           {
+               SqlStatement stmt = LoginDatabase.CreateStatement(id, "UPDATE account SET active_realm_id = ? WHERE id = ?");
+               stmt.PExecute(uint32(0), GetAccountId());
+           }
+        }
         static SqlStatementID id;
 
         SqlStatement stmt = LoginDatabase.CreateStatement(id, "UPDATE `account` SET `active_realm_id` = ? WHERE `id` = ?");
@@ -604,7 +588,6 @@ void WorldSession::LogoutPlayer(bool Save)
 
         ///- Leave all channels before player delete...
         _player->CleanupChannels();
-#ifndef ENABLE_PLAYERBOTS
         ///- If the player is in a group (or invited), remove him. If the group if then only 1 person, disband the group.
         _player->UninviteFromGroup();
 
@@ -614,7 +597,6 @@ void WorldSession::LogoutPlayer(bool Save)
         {
             _player->RemoveFromGroup();
         }
-#endif
         ///- Send update to group
         if (_player->GetGroup())
         {
@@ -625,9 +607,7 @@ void WorldSession::LogoutPlayer(bool Save)
         sSocialMgr.SendFriendStatus(_player, FRIEND_OFFLINE, _player->GetObjectGuid(), true);
         sSocialMgr.RemovePlayerSocial(_player->GetGUIDLow());
 
-#ifdef ENABLE_PLAYERBOTS
         uint32 guid = GetPlayer()->GetGUIDLow();
-#endif
 
         ///- Used by Eluna
 #ifdef ENABLE_ELUNA
@@ -662,11 +642,8 @@ void WorldSession::LogoutPlayer(bool Save)
         // No SQL injection as AccountId is uint32
 
         static SqlStatementID updChars;
-#ifdef ENABLE_PLAYERBOTS
         SqlStatement stmt = CharacterDatabase.CreateStatement(updChars, "UPDATE characters SET online = 0 WHERE account = ?");
-#else
-        stmt = CharacterDatabase.CreateStatement(updChars, "UPDATE `characters` SET `online` = 0 WHERE `account` = ?");
-#endif
+
         stmt.PExecute(GetAccountId());
 
         DEBUG_LOG("SESSION: Sent SMSG_LOGOUT_COMPLETE Message");
