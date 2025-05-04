@@ -1,0 +1,3 @@
+[submodule "src/modules/Bots"]
+	path = src/modules/Bots
+	url = git@github.com:travsart/playerbots.git
