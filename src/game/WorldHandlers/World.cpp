@@ -1697,8 +1697,6 @@ void World::showFooter()
     modules_.insert("      ScriptDev3 (SD3) : Enabled");
 #endif
 
-    // PLAYERBOTS can be included or excluded but also disabled via mangos.conf
-
     bool playerBotActive = sConfig.GetBoolDefault("PlayerbotAI.DisableBots", true);
     if (playerBotActive)
     {

@@ -270,7 +270,6 @@ target_compile_definitions(game
     PUBLIC
         $<$<BOOL:${SOAP}>:ENABLE_SOAP>
         $<$<BOOL:${SCRIPT_LIB_SD3}>:ENABLE_SD3>
-        ENABLE_PLAYERBOTS
         $<$<BOOL:${SCRIPT_LIB_ELUNA}>:ENABLE_ELUNA ELUNA_EXPANSION=3 ELUNA_MANGOS>
 )
 

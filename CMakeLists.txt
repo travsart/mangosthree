@@ -46,7 +46,6 @@ option(BUILD_TOOLS          "Build the map/vmap/mmap extractors"            ON)
 option(USE_STORMLIB         "Use StormLib for reading MPQs"                 ON)
 option(SCRIPT_LIB_ELUNA     "Compile with support for Eluna scripts"        ON)
 option(SCRIPT_LIB_SD3       "Compile with support for ScriptDev3 scripts"   ON)
-option(PLAYERBOTS           "Enable Player Bots"                            On)
 option(SOAP                 "Enable remote access via SOAP"                 OFF)
 option(PCH                  "Enable precompiled headers"                    ON)
 option(DEBUG                "Enable debug build (only on non IDEs)"         On)
@@ -67,8 +66,6 @@ message(
    Scripting engines:
     SCRIPT_LIB_ELUNA        Compile with support for Eluna scripts
     SCRIPT_LIB_SD3          Compile with support for ScriptDev3 scripts
-   Modules:
-    PLAYERBOTS              Enable Player Bots
 
   To set an option simply type -D<OPTION>=<VALUE> after 'cmake <srcs>'.
   Also, you can specify the generator with -G. See 'cmake --help' for more details
