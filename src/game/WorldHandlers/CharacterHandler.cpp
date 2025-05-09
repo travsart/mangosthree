@@ -49,6 +49,9 @@
 #include "LuaEngine.h"
 #endif /* ENABLE_ELUNA */
 
+#include "playerbot/playerbot.h"
+#include "playerbot/PlayerbotAIConfig.h"
+
 // config option SkipCinematics supported values
 enum CinematicsSkipMode
 {
@@ -56,6 +59,98 @@ enum CinematicsSkipMode
     CINEMATICS_SKIP_SAME_RACE = 1,
     CINEMATICS_SKIP_ALL       = 2,
 };
+
+
+class PlayerbotLoginQueryHolder : public LoginQueryHolder
+{
+private:
+    uint32 masterAccountId;
+    PlayerbotHolder* playerbotHolder;
+
+public:
+    PlayerbotLoginQueryHolder(PlayerbotHolder* playerbotHolder, uint32 masterAccount, uint32 accountId, uint32 guid)
+        : LoginQueryHolder(accountId, ObjectGuid(HIGHGUID_PLAYER, guid)), masterAccountId(masterAccount), playerbotHolder(playerbotHolder) { }
+
+public:
+    uint32 GetMasterAccountId() const { return masterAccountId; }
+    PlayerbotHolder* GetPlayerbotHolder() { return playerbotHolder; }
+};
+
+void PlayerbotHolder::AddPlayerBot(uint32 playerGuid, uint32 masterAccount)
+{
+    // has bot already been added?
+    ObjectGuid guid = ObjectGuid(HIGHGUID_PLAYER, playerGuid);
+    Player* bot = sObjectMgr.GetPlayer(guid);
+
+    if (bot && bot->IsInWorld())
+        return;
+
+    uint32 accountId = sObjectMgr.GetPlayerAccountIdByGUID(guid);
+    if (accountId == 0)
+        return;
+
+    PlayerbotLoginQueryHolder *holder = new PlayerbotLoginQueryHolder(this, masterAccount, accountId, playerGuid);
+    if (!holder->Initialize())
+    {
+        delete holder;                                      // delete all unprocessed queries
+        return;
+    }
+
+    CharacterDatabase.DelayQueryHolder(this, &PlayerbotHolder::HandlePlayerBotLoginCallback, holder);
+}
+
+void PlayerbotHolder::HandlePlayerBotLoginCallback(QueryResult * dummy, SqlQueryHolder * holder)
+{
+    if (!holder)
+        return;
+
+    PlayerbotLoginQueryHolder* lqh = (PlayerbotLoginQueryHolder*)holder;
+    uint32 masterAccount = lqh->GetMasterAccountId();
+
+    WorldSession* masterSession = masterAccount ? sWorld.FindSession(masterAccount) : NULL;
+    uint32 botAccountId = lqh->GetAccountId();
+    WorldSession *botSession = new WorldSession(botAccountId, NULL, SEC_PLAYER, MAX_EXPANSION, 0, LOCALE_enUS, "", 0, 0, false);
+    botSession->SetNoAnticheat();
+
+    // has bot already been added?
+    if (sObjectMgr.GetPlayer(lqh->GetGuid()))
+        return;
+
+    uint32 guid = lqh->GetGuid().GetRawValue();
+    botSession->HandlePlayerLogin(lqh); // will delete lqh
+
+    Player* bot = botSession->GetPlayer();
+    if (!bot)
+    {
+        sLog.outError("Error logging in bot %d, please try to reset all random bots", guid);
+        return;
+    }
+
+    bot->RemovePlayerbotMgr();
+    sRandomPlayerbotMgr.OnPlayerLogin(bot);
+
+    bool allowed = false;
+    if (botAccountId == masterAccount)
+        allowed = true;
+    else if (masterSession && sPlayerbotAIConfig.allowGuildBots && bot->GetGuildId() == masterSession->GetPlayer()->GetGuildId())
+        allowed = true;
+    else if (sPlayerbotAIConfig.IsInRandomAccountList(botAccountId))
+        allowed = true;
+
+    if (allowed)
+    {
+        OnBotLogin(bot);
+        return;
+    }
+
+    if (masterSession)
+    {
+        ChatHandler ch(masterSession);
+        ch.PSendSysMessage("You are not allowed to control bot %s", bot->GetName());
+    }
+    LogoutPlayerBot(bot->GetObjectGuid());
+    sLog.outError("Attempt to add not allowed bot %s, please try to reset all random bots", bot->GetName());
+}
 
 class LoginQueryHolder : public SqlQueryHolder
 {
@@ -149,7 +244,15 @@ class CharacterHandler
                 delete holder;
                 return;
             }
+            ObjectGuid guid = ((LoginQueryHolder*)holder)->GetGuid();
             session->HandlePlayerLogin((LoginQueryHolder*)holder);
+            Player* player = sObjectMgr.GetPlayer(guid, true);
+            if (player)
+            {
+                player->CreatePlayerbotMgr();
+                player->GetPlayerbotMgr()->OnPlayerLogin(player);
+                sRandomPlayerbotMgr.OnPlayerLogin(player);
+            }
         }
 } chrHandler;
 
@@ -676,11 +779,73 @@ void WorldSession::HandlePlayerLoginOpcode(WorldPacket& recv_data)
     m_playerLoading = true;
 
     ObjectGuid playerGuid;
+    Player* pCurrChar = nullptr;
+    WorldPacket data(SMSG_CHARACTER_LOGIN_FAILED, 1);
 
     recv_data.ReadGuidMask<2, 3, 0, 6, 4, 5, 1, 7>(playerGuid);
     recv_data.ReadGuidBytes<2, 7, 0, 3, 5, 6, 1, 4>(playerGuid);
+    pCurrChar = ObjectAccessor::FindPlayer(playerGuid, false);
 
     DEBUG_LOG("WORLD: Received opcode Player Logon Message from %s", playerGuid.GetString().c_str());
+
+
+    if (pCurrChar && pCurrChar->GetPlayerbotAI())
+    {
+        WorldSession* botSession = pCurrChar->GetSession();
+        SetPlayer(pCurrChar, playerGuid);
+        _player->SetSession(this);
+        _logoutTime = time(0);
+
+        m_sessionDbcLocale = botSession->m_sessionDbcLocale;
+        m_sessionDbLocaleIndex = botSession->m_sessionDbLocaleIndex;
+
+        PlayerbotMgr* mgr = _player->GetPlayerbotMgr();
+        if (!mgr || mgr->GetMaster() != _player)
+        {
+            _player->RemovePlayerbotMgr();
+            _player->CreatePlayerbotMgr();
+            _player->GetPlayerbotMgr()->OnPlayerLogin(_player);
+
+            if (sRandomPlayerbotMgr.GetPlayerBot(playerGuid))
+
+                sRandomPlayerbotMgr.MovePlayerBot(playerGuid, _player->GetPlayerbotMgr());
+            else
+                _player->GetPlayerbotMgr()->OnBotLogin(_player);
+        }
+    }
+
+    if (_player)
+    {
+        // player is reconnecting
+
+        if (!pCurrChar)
+        {
+            sLog.outError("HandlePlayerLoginOpcode> %s try to login a second char, AccountId = %u", _player->GetGuidStr().c_str(), GetAccountId());
+            data << (uint8)CHAR_LOGIN_DUPLICATE_CHARACTER;
+            SendPacket(data);
+            return;
+        }
+
+        if (!isLogingOut())
+        {
+            sLog.outError("HandlePlayerLoginOpcode> %s try to login again, AccountId = %u", pCurrChar->GetGuidStr().c_str(), GetAccountId());
+            data << (uint8)CHAR_LOGIN_FAILED;
+            SendPacket(data);
+            return;
+        }
+
+        if (!_player->IsInWorld())
+            // finish pending transfers before starting the logout
+            while (_player && _player->IsBeingTeleportedFar())
+                HandleMoveWorldportAckOpcode();
+
+        // release loot on reconnect
+        if (Loot* loot = sLootMgr.GetLoot(_player))
+            loot->Release(_player);
+
+        HandlePlayerReconnect();
+        return;
+    }
 
     LoginQueryHolder* holder = new LoginQueryHolder(GetAccountId(), playerGuid);
     if (!holder->Initialize())
@@ -1010,6 +1175,200 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder* holder)
         pCurrChar->RemoveAtLoginFlag(AT_LOGIN_FIRST);
     }
 
+    if (!sPlayerbotAIConfig.IsInRandomAccountList(GetAccountId()))
+    {
+        // add collector to all accounts if enabled
+        if (sWorld.getConfig(CONFIG_BOOL_COLLECTORS_EDITION) && !HasAccountFlag(ACCOUNT_FLAG_COLLECTOR_CLASSIC | ACCOUNT_FLAG_COLLECTOR_TBC | ACCOUNT_FLAG_COLLECTOR_WRATH))
+        {
+            AddAccountFlag(ACCOUNT_FLAG_COLLECTOR_CLASSIC | ACCOUNT_FLAG_COLLECTOR_TBC | ACCOUNT_FLAG_COLLECTOR_WRATH);
+            LoginDatabase.PExecute("UPDATE account SET flags = flags | 0x%x WHERE id = %u", (ACCOUNT_FLAG_COLLECTOR_CLASSIC | ACCOUNT_FLAG_COLLECTOR_TBC | ACCOUNT_FLAG_COLLECTOR_WRATH), GetAccountId());
+        }
+    }
+
+    // create collector's edition reward (tbc)
+    if (HasAccountFlag(ACCOUNT_FLAG_COLLECTOR_TBC) && !(pCurrChar->HasItemCount(25535, 1, true) || pCurrChar->HasSpell(32298)))
+    {
+        bool hasPetReward = false;
+        // check if already has in mail
+        for (PlayerMails::iterator itr = _player->GetMailBegin(); itr != _player->GetMailEnd(); ++itr)
+        {
+            // skip deleted mails
+            if ((*itr)->state == MAIL_STATE_DELETED)
+                continue;
+
+            uint8 item_count = uint8((*itr)->items.size());
+            for (uint8 i = 0; i < item_count; ++i)
+            {
+                Item* item = _player->GetMItem((*itr)->items[i].item_guid);
+                if (item->GetEntry() == 25535)
+                {
+                    hasPetReward = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasPetReward)
+        {
+            std::ostringstream body;
+            body << "Hello, " << pCurrChar->GetName() << ",\n\n";
+            body << "Welcome to the World of Warcraft!\n\n";
+            body << "As special thanks for purchasing the World of Warcraft: The Burning Crusade Collector's Edition we send you a gift: a little companion to join you on your quest for adventure and glory.\n\n";
+            body << "Thanks again, and enjoy your stay in the World of Warcraft!";
+
+            MailDraft draft;
+            draft.SetSubjectAndBody("Collector's Edition Gift", body.str());
+
+            Item* gift = Item::CreateItem(25535, 1, nullptr);
+            gift->SaveToDB();
+            draft.AddItem(gift);
+
+            MailSender sender(MAIL_NORMAL, (uint32)0, MAIL_STATIONERY_GM);
+            draft.SendMailTo(MailReceiver(pCurrChar, pCurrChar->GetObjectGuid()), sender);
+        }
+    }
+
+    // create collector's edition reward (tbc)
+    if (HasAccountFlag(ACCOUNT_FLAG_COLLECTOR_WRATH) && !(pCurrChar->HasItemCount(39286, 1, true) || pCurrChar->HasSpell(52615)))
+    {
+        bool hasPetReward = false;
+        // check if already has in mail
+        for (PlayerMails::iterator itr = _player->GetMailBegin(); itr != _player->GetMailEnd(); ++itr)
+        {
+            // skip deleted mails
+            if ((*itr)->state == MAIL_STATE_DELETED)
+                continue;
+
+            uint8 item_count = uint8((*itr)->items.size());
+            for (uint8 i = 0; i < item_count; ++i)
+            {
+                Item* item = _player->GetMItem((*itr)->items[i].item_guid);
+                if (item->GetEntry() == 39286)
+                {
+                    hasPetReward = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasPetReward)
+        {
+            std::ostringstream body;
+            body << "Hello, " << pCurrChar->GetName() << ",\n\n";
+            body << "Welcome to the World of Warcraft!\n\n";
+            body << "As special thanks for purchasing the World of Warcraft: Wrath of the Lich King Collector's Edition we send you a gift: a little companion to join you on your quest for adventure and glory.\n\n";
+            body << "Thanks again, and enjoy your stay in the World of Warcraft!";
+
+            MailDraft draft;
+            draft.SetSubjectAndBody("Collector's Edition Gift", body.str());
+
+            Item* gift = Item::CreateItem(39286, 1, nullptr);
+            gift->SaveToDB();
+            draft.AddItem(gift);
+
+            MailSender sender(MAIL_NORMAL, (uint32)0, MAIL_STATIONERY_GM);
+            draft.SendMailTo(MailReceiver(pCurrChar, pCurrChar->GetObjectGuid()), sender);
+        }
+    }
+
+    // create collector's edition reward (vanilla)
+    if (HasAccountFlag(ACCOUNT_FLAG_COLLECTOR_CLASSIC))
+    {
+        uint32 itemid = 0;
+        uint32 questid = 0;
+        switch (pCurrChar->getRace())
+        {
+        case RACE_HUMAN:
+            itemid = 14646;
+            questid = 5805;
+            break;
+        case RACE_ORC:
+        case RACE_TROLL:
+            itemid = 14649;
+            questid = 5843;
+            break;
+        case RACE_DWARF:
+        case RACE_GNOME:
+            itemid = 14647;
+            questid = 5841;
+            break;
+        case RACE_NIGHTELF:
+            itemid = 14648;
+            questid = 5842;
+            break;
+        case RACE_UNDEAD:
+            itemid = 14651;
+            questid = 5847;
+            break;
+        case RACE_TAUREN:
+            itemid = 14650;
+            questid = 5844;
+            break;
+        case RACE_DRAENEI:
+            itemid = 22888;
+            questid = 9278;
+            break;
+        case RACE_BLOODELF:
+            itemid = 20938;
+            questid = 8547;
+            break;
+        }
+
+        if (itemid && questid)
+        {
+            if (!pCurrChar->HasQuest(questid) && !pCurrChar->HasItemCount(itemid, 1, true) && !pCurrChar->GetQuestRewardStatus(questid))
+            {
+                bool hasPetReward = false;
+                // check if already has in mail
+                for (PlayerMails::iterator itr = _player->GetMailBegin(); itr != _player->GetMailEnd(); ++itr)
+                {
+                    // skip deleted mails
+                    if ((*itr)->state == MAIL_STATE_DELETED)
+                        continue;
+
+                    uint8 item_count = uint8((*itr)->items.size());
+                    for (uint8 i = 0; i < item_count; ++i)
+                    {
+                        Item* item = _player->GetMItem((*itr)->items[i].item_guid);
+                        if (item->GetEntry() == itemid)
+                        {
+                            hasPetReward = true;
+                            break;
+                        }
+                    }
+                }
+
+                ItemPrototype const* pProto = ObjectMgr::GetItemPrototype(itemid);
+                if (pProto && !hasPetReward)
+                {
+                    uint32 noSpaceForCount = 0;
+                    ItemPosCountVec dest;
+                    uint8 msg = pCurrChar->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemid, 1, &noSpaceForCount);
+                    if (msg != EQUIP_ERR_OK)
+                    {
+                        std::ostringstream body;
+                        body << "Hello, " << pCurrChar->GetName() << ",\n\n";
+                        body << "Welcome to the World of Warcraft!\n\n";
+                        body << "As special thanks for purchasing the World of Warcraft Collector's Edition we send you a gift: a little companion to join you on your quest for adventure and glory.\n\n";
+                        body << "Thanks again, and enjoy your stay in the World of Warcraft!";
+
+                        MailDraft draft;
+                        draft.SetSubjectAndBody("Collector's Edition Gift", body.str());
+
+                        Item* gift = Item::CreateItem(itemid, 1, nullptr);
+                        gift->SaveToDB();
+                        draft.AddItem(gift);
+
+                        MailSender sender(MAIL_NORMAL, (uint32)0, MAIL_STATIONERY_GM);
+                        draft.SendMailTo(MailReceiver(pCurrChar, pCurrChar->GetObjectGuid()), sender);
+                    }
+                    else
+                        Item* item = pCurrChar->StoreNewItem(dest, itemid, true);
+                }
+            }
+        }
+    }
+
     /* If the server is shutting down, show shutdown time remaining */
     if (sWorld.IsShutdowning())
     {
@@ -1057,6 +1416,17 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder* holder)
         e->OnLogin(pCurrChar);
     }
 #endif /* ENABLE_ELUNA */
+
+    bool SoloCraftEnable = sWorld.getConfig(CONFIG_BOOL_SOLOCRAFT_ENABLED);
+    bool SoloCraftAnnounceModule = sWorld.getConfig(CONFIG_BOOL_SOLOCRAFT_ANNOUNCE);
+
+    if (SoloCraftEnable)
+    {
+        if (SoloCraftAnnounceModule)
+        {
+            ChatHandler(pCurrChar->GetSession()).SendSysMessage("This server is running |cff4CFF00SPP SoloCraft Custom |rmodule.");
+        }
+    }
 
     // Handle Login-Achievements (should be handled after loading)
     pCurrChar->GetAchievementMgr().UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_ON_LOGIN, 1);

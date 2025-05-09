@@ -682,6 +682,12 @@ class World
         **/
         void InvalidatePlayerDataToAllClient(ObjectGuid guid);
 
+        static uint32 GetCurrentMSTime() { return m_currentMSTime; }
+        static TimePoint GetCurrentClockTime() { return m_currentTime; }
+        static uint32 GetCurrentDiff() { return m_currentDiff; }
+        static uint32 GetAverageDiff() { return m_averageDiff; }
+        static uint32 GetMaxDiff() { return m_maxDiff; }
+
 #ifdef ENABLE_ELUNA
         Eluna* GetEluna() const { return eluna; }
         Eluna* eluna;
@@ -805,6 +811,15 @@ class World
 
         // List of Maps that should be force-loaded on startup
         std::set<uint32> m_configForceLoadMapIds;
+
+        static uint32 m_currentMSTime;
+        static TimePoint m_currentTime;
+        static uint32 m_currentDiff;
+        static uint32 m_currentDiffSum;
+        static uint32 m_currentDiffSumIndex;
+        static uint32 m_averageDiff;
+        static uint32 m_maxDiff;
+        static std::list<uint32> m_histDiff;
 };
 
 extern uint32 realmID;

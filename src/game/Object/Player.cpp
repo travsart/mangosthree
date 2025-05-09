@@ -79,6 +79,13 @@
 #include "LuaEngine.h"
 #endif /* ENABLE_ELUNA */
 
+#include "playerbot/playerbot.h"
+#include "playerbot/PlayerbotAIConfig.h"
+
+#ifdef ENABLE_MODULES
+#include "ModuleMgr.h"
+#endif
+
 #include <cmath>
 
 #define ZONE_UPDATE_INTERVAL (1*IN_MILLISECONDS)
@@ -499,6 +506,9 @@ Player::Player(WorldSession* session): Unit(), m_mover(this), m_camera(this), m_
     m_cachedGS = 0;
 
     m_slot = 255;
+
+    m_playerbotAI = nullptr;
+    m_playerbotMgr = nullptr;
 }
 
 Player::~Player()
@@ -554,6 +564,13 @@ Player::~Player()
 
     delete m_declinedname;
     delete m_runes;
+
+    RemovePlayerbotAI();
+    RemovePlayerbotMgr();
+
+#ifdef ENABLE_MODULES
+    sModuleMgr.OnLogOut(this);
+#endif
 }
 
 void Player::CleanupsBeforeDelete()
@@ -1487,8 +1504,10 @@ void Player::Update(uint32 update_diff, uint32 p_time)
     {
         if (update_diff >= m_DetectInvTimer)
         {
-            HandleStealthedUnitsDetection();
-            m_DetectInvTimer = 3000;
+            if(isRealPlayer()) {
+                HandleStealthedUnitsDetection();
+            }
+            m_DetectInvTimer = GetMap()->IsBattleGroundOrArena() ? 500 : 2000;
         }
         else
         {
@@ -1550,6 +1569,41 @@ void Player::Update(uint32 update_diff, uint32 p_time)
     if (IsHasDelayedTeleport())
     {
         TeleportTo(m_teleport_dest, m_teleport_options);
+    }
+}
+
+void Player::CreatePlayerbotAI()
+{
+    assert(!m_playerbotAI);
+    m_playerbotAI = std::make_unique<PlayerbotAI>(this);
+}
+
+void Player::RemovePlayerbotAI()
+{
+    m_playerbotAI = nullptr;
+}
+
+void Player::CreatePlayerbotMgr()
+{
+    assert(!m_playerbotMgr);
+    m_playerbotMgr = std::make_unique<PlayerbotMgr>(this);
+}
+
+void Player::RemovePlayerbotMgr()
+{
+    m_playerbotMgr = nullptr;
+}
+
+void Player::UpdateAI(const uint32 diff, bool minimal)
+{
+    if (m_playerbotAI)
+    {
+        m_playerbotAI->UpdateAI(diff, minimal);
+    }
+
+    if (m_playerbotMgr)
+    {
+        m_playerbotMgr->UpdateAI(diff);
     }
 }
 
@@ -15963,7 +16017,7 @@ void Player::AddQuest(Quest const* pQuest, Object* questGiver)
     }
 
     // quest accept scripts
-    if (questGiver)
+    if (questGiver && this != questGiver)
     {
         switch (questGiver->GetTypeId())
         {
@@ -16273,7 +16327,7 @@ void Player::RewardQuest(Quest const* pQuest, uint32 reward, Object* questGiver,
             break;
     }
 
-    if (!handled && pQuest->GetQuestCompleteScript() != 0)
+    if (this != questGiver && !handled && pQuest->GetQuestCompleteScript() != 0)
     {
         GetMap()->ScriptsStart(DBS_ON_QUEST_END, pQuest->GetQuestCompleteScript(), questGiver, this, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_SOURCE);
     }
@@ -20611,10 +20665,13 @@ void Player::_SaveInventory()
         m_items[i]->FSetState(ITEM_NEW);
     }
 
-    // update enchantment durations
-    for (EnchantDurationList::const_iterator itr = m_enchantDuration.begin(); itr != m_enchantDuration.end(); ++itr)
+    if (!GetPlayerbotAI())  // hackfix for crash during save
     {
-        itr->item->SetEnchantmentDuration(itr->slot, itr->leftduration);
+        // update enchantment durations
+        for (EnchantDurationList::const_iterator itr = m_enchantDuration.begin(); itr != m_enchantDuration.end(); ++itr)
+        {
+            itr->item->SetEnchantmentDuration(itr->slot, itr->leftduration);
+        }
     }
 
     // if no changes
@@ -28172,6 +28229,10 @@ AreaLockStatus Player::GetAreaTriggerLockStatus(AreaTrigger const* at, Difficult
     if (mapEntry->IsDungeon() && !mapDiff)
     {
         return AREA_LOCKSTATUS_MISSING_DIFFICULTY;
+    }
+
+    if (!isRealPlayer() && GetPlayerbotAI() && GetPlayerbotAI()->CanEnterArea(at)) {
+        return AREA_LOCKSTATUS_OK;
     }
 
     // Expansion requirement

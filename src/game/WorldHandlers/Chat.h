@@ -125,6 +125,9 @@ class ChatHandler
         bool isValidChatMessage(const char* msg);
         bool HasSentErrorMessage() { return sentErrorMessage;}
 
+        WorldSession* GetSession() { return m_session; }
+        bool HandlePerfMonCommand(char* args);
+
         /**
         * \brief Prepare SMSG_GM_MESSAGECHAT/SMSG_MESSAGECHAT
         *
@@ -198,10 +201,6 @@ class ChatHandler
         bool HandleAHBotItemsAmountQualityCommand(char* args);
         bool HandleAHBotItemsRatioCommand(char* args);
         template <int H>
-        bool HandleAHBotItemsRatioHouseCommand(char* args);
-        bool HandleAHBotRebuildCommand(char* args);
-        bool HandleAHBotReloadCommand(char* args);
-        bool HandleAHBotStatusCommand(char* args);
 
         bool HandleAuctionAllianceCommand(char* args);
         bool HandleAuctionGoblinCommand(char* args);
@@ -673,6 +672,9 @@ class ChatHandler
         bool HandleWaterwalkCommand(char* args);
         bool HandleQuitCommand(char* args);
         bool HandleShowGearScoreCommand(char* args);
+        bool HandlePlayerbotCommand(char* args);
+        bool HandleRandomPlayerbotCommand(char* args);
+        bool HandleAhBotCommand(char* args);
 
         bool HandleMmapPathCommand(char* args);
         bool HandleMmapLocCommand(char* args);

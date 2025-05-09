@@ -43,6 +43,10 @@
 #include "LuaEngine.h"
 #endif /* ENABLE_ELUNA */
 
+#ifdef ENABLE_MODULES
+#include "ModuleMgr.h"
+#endif
+
 #define LOOT_ROLL_TIMEOUT  (1*MINUTE*IN_MILLISECONDS)
 
 //===================================================

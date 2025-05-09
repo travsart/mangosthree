@@ -43,6 +43,12 @@
 #ifdef ENABLE_ELUNA
 #include "LuaEngine.h"
 #endif /* ENABLE_ELUNA */
+#include "playerbot/playerbot.h"
+#include "playerbot/RandomPlayerbotMgr.h"
+
+#ifdef ENABLE_MODULES
+#include "ModuleMgr.h"
+#endif
 
 bool WorldSession::processChatmessageFurtherAfterSecurityChecks(std::string& msg, uint32 lang)
 {
@@ -234,6 +240,18 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
                 break;
             }
 
+            if (GetSecurity() > SEC_PLAYER && GetPlayer()->IsGameMaster()) {
+                sRandomPlayerbotMgr.HandleCommand(type, msg, *_player, "", TEAM_BOTH_ALLOWED, lang);
+            }
+            else {
+                sRandomPlayerbotMgr.HandleCommand(type, msg, *_player, "", GetPlayer()->GetTeam(), lang);
+            }
+            // apply to own bots
+            if (_player->GetPlayerbotMgr())
+            {
+                _player->GetPlayerbotMgr()->HandleCommand(type, msg, lang);
+            }
+
             if (type == CHAT_MSG_SAY)
             {
 #ifdef ENABLE_ELUNA
@@ -324,6 +342,15 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
                 }
             }
 
+            if (player->GetPlayerbotAI())
+            {
+                player->GetPlayerbotAI()->HandleCommand(type, msg, *GetPlayer(), lang);
+                GetPlayer()->m_speakTime = 0;
+                GetPlayer()->m_speakCount = 0;
+            }
+
+            if (msg.find("BOT\t") != 0) //These are spoofed SendAddonMessage with channel "WHISPER".
+
             // Used by Eluna
 #ifdef ENABLE_ELUNA
             if (Eluna* e = sWorld.GetEluna())
@@ -379,6 +406,17 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
                 return;
             }
 
+            for (GroupReference* itr = group->GetFirstMember(); itr != NULL; itr = itr->next())
+            {
+                Player* player = itr->getSource();
+                if (player && player->GetPlayerbotAI())
+                {
+                    player->GetPlayerbotAI()->HandleCommand(type, msg, *GetPlayer(), lang);
+                    GetPlayer()->m_speakTime = 0;
+                    GetPlayer()->m_speakCount = 0;
+                }
+            }
+
             // Used by Eluna
 #ifdef ENABLE_ELUNA
             if (Eluna* e = sWorld.GetEluna())
@@ -421,7 +459,7 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
                 break;
             }
 
-            if (GetPlayer()->GetGuildId())
+            if (GetPlayer()->GetGuildId()) {
                 if (Guild* guild = sGuildMgr.GetGuildById(GetPlayer()->GetGuildId()))
                 {
                     // Used by Eluna
@@ -437,6 +475,19 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
 
                     guild->BroadcastToGuild(this, msg, lang == LANG_ADDON ? LANG_ADDON : LANG_UNIVERSAL);
                 }
+            }
+            PlayerbotMgr *mgr = GetPlayer()->GetPlayerbotMgr();
+            if (mgr && GetPlayer()->GetGuildId())
+            {
+                mgr->ForEachPlayerbot([&](Player* bot)
+                {
+                    if (bot->GetGuildId() == GetPlayer()->GetGuildId())
+                    {
+                        bot->GetPlayerbotAI()->HandleCommand(type, msg, *GetPlayer(), lang);
+                    }
+                });
+            }
+            sRandomPlayerbotMgr.HandleCommand(type, msg, *_player, "", GetPlayer()->GetTeam(), lang);
 
             break;
         }
@@ -520,6 +571,17 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
                 }
             }
 
+            for (GroupReference* itr = group->GetFirstMember(); itr != NULL; itr = itr->next())
+            {
+                Player* player = itr->getSource();
+                if (player && player->GetPlayerbotAI())
+                {
+                    player->GetPlayerbotAI()->HandleCommand(type, msg, *GetPlayer(), lang);
+                    GetPlayer()->m_speakTime = 0;
+                    GetPlayer()->m_speakCount = 0;
+                }
+            }
+
             // Used by Eluna
 #ifdef ENABLE_ELUNA
             if (Eluna* e = sWorld.GetEluna())
@@ -571,6 +633,17 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
                 }
             }
 
+            for (GroupReference* itr = group->GetFirstMember(); itr != NULL; itr = itr->next())
+            {
+                Player* player = itr->getSource();
+                if (player && player->GetPlayerbotAI())
+                {
+                    player->GetPlayerbotAI()->HandleCommand(type, msg, *GetPlayer(), lang);
+                    GetPlayer()->m_speakTime = 0;
+                    GetPlayer()->m_speakCount = 0;
+                }
+            }
+
             // Used by Eluna
 #ifdef ENABLE_ELUNA
             if (Eluna* e = sWorld.GetEluna())
@@ -608,7 +681,17 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
                 {
                     return;
                 }
-
+            
+            for (GroupReference* itr = group->GetFirstMember(); itr != NULL; itr = itr->next())
+            {
+                Player* player = itr->getSource();
+                if (player && player->GetPlayerbotAI())
+                {
+                    player->GetPlayerbotAI()->HandleCommand(type, msg, *GetPlayer(), lang);
+                    GetPlayer()->m_speakTime = 0;
+                    GetPlayer()->m_speakCount = 0;
+                }
+            }
             // Used by Eluna
 #ifdef ENABLE_ELUNA
             if (Eluna* e = sWorld.GetEluna())
@@ -736,6 +819,19 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recv_data)
 #endif /* ENABLE_ELUNA */
 
                     chn->Say(_player, msg.c_str(), lang);
+
+                    // if GM apply to all random bots
+                    if (GetSecurity() > SEC_PLAYER && GetPlayer()->IsGameMaster()) {
+                        sRandomPlayerbotMgr.HandleCommand(type, msg, *_player, "", TEAM_BOTH_ALLOWED, lang);
+                    }
+                    else {
+                        sRandomPlayerbotMgr.HandleCommand(type, msg, *_player, "", GetPlayer()->GetTeam(), lang);
+                    }
+                    // apply to own bots
+                    if (_player->GetPlayerbotMgr() && chn->GetFlags() & 0x18)
+                    {
+                        _player->GetPlayerbotMgr()->HandleCommand(type, msg, lang);
+                    }
                 }
             }
         } break;
@@ -973,6 +1069,10 @@ void WorldSession::HandleEmoteOpcode(WorldPacket& recv_data)
     }
 #endif /* ENABLE_ELUNA */
     GetPlayer()->HandleEmoteCommand(emote);
+
+#ifdef ENABLE_MODULES
+    sModuleMgr.OnEmote(GetPlayer(), unit, textEmote);
+#endif
 }
 
 namespace MaNGOS

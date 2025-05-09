@@ -46,6 +46,10 @@ void VisibleChangesNotifier::Visit(CameraMapType& m)
 void VisibleNotifier::Notify()
 {
     Player& player = *i_camera.GetOwner();
+
+    if (!player.isRealPlayer()) {
+        return;
+    }
     // at this moment i_clientGUIDs have guids that not iterate at grid level checks
     // but exist one case when this possible and object not out of range: transports
     if (Transport* transport = player.GetTransport())

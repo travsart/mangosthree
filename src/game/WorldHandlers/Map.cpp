@@ -52,6 +52,9 @@
 #include "ElunaLoader.h"
 #endif /* ENABLE_ELUNA */
 
+#include "playerbot/playerbot.h"
+#include "playerbot/PlayerbotAIConfig.h"
+
 Map::~Map()
 {
 #ifdef ENABLE_ELUNA
@@ -120,11 +123,11 @@ void Map::LoadMapAndVMap(int gx, int gy)
 
 Map::Map(uint32 id, time_t expiry, uint32 InstanceId, uint8 SpawnMode)
     : i_mapEntry(sMapStore.LookupEntry(id)), i_spawnMode(SpawnMode),
-      i_id(id), i_InstanceId(InstanceId), m_unloadTimer(0),
+      i_id(id), i_InstanceId(InstanceId), m_unloadTimer(0),m_clientUpdateTimer(0),
       m_VisibleDistance(DEFAULT_VISIBILITY_DISTANCE), m_persistentState(NULL),
       m_activeNonPlayersIter(m_activeNonPlayers.end()),
       i_gridExpiry(expiry), m_TerrainData(sTerrainMgr.LoadTerrain(id)),
-      i_data(NULL)
+      i_data(NULL), m_activeAreasTimer(0), hasRealPlayers(false)
 {
 #ifdef ENABLE_ELUNA
     // lua state begins uninitialized
@@ -547,7 +550,29 @@ bool Map::loaded(const GridPair& p) const
 
 void Map::Update(const uint32& t_diff)
 {
+    MaNGOS::ObjectUpdater updater(t_diff);
+    // for creature
+    TypeContainerVisitor<MaNGOS::ObjectUpdater, GridTypeMapContainer  > grid_object_update(updater);
+    // for pets
+    TypeContainerVisitor<MaNGOS::ObjectUpdater, WorldTypeMapContainer > world_object_update(updater);
+    
+    uint64 count = 0;
+
     m_dyn_tree.update(t_diff);
+
+    // GetMessager().Execute(this); Other does this????? TODO
+    // m_spawnManager.Update();
+
+     /// update active cells around players and active objects
+     resetMarkedCells();
+
+    // Other does this????? TODO
+    // for (m_transportsIterator = m_transports.begin(); m_transportsIterator != m_transports.end();)
+    // {
+    //     Transport* transport = *m_transportsIterator;
+    //     ++m_transportsIterator;
+    //     transport->Update(t_diff);
+    // }
 
     /// update worldsessions for existing players
     for (m_mapRefIter = m_mapRefManager.begin(); m_mapRefIter != m_mapRefManager.end(); ++m_mapRefIter)
@@ -562,36 +587,72 @@ void Map::Update(const uint32& t_diff)
         }
     }
 
-    /// update players at tick
-    for (m_mapRefIter = m_mapRefManager.begin(); m_mapRefIter != m_mapRefManager.end(); ++m_mapRefIter)
+    // active areas timer
+    m_activeAreasTimer += t_diff;
+    if (m_activeAreasTimer >= 10000)
     {
-        Player* plr = m_mapRefIter->getSource();
-        if (plr && plr->IsInWorld())
+        m_activeAreasTimer = 0;
+        m_activeZones.clear();
+    }
+
+    if (!m_activeAreasTimer && IsContinent() && HasRealPlayers()) {
+        /// update players at tick
+        for (m_mapRefIter = m_mapRefManager.begin(); m_mapRefIter != m_mapRefManager.end(); ++m_mapRefIter)
         {
-            WorldObject::UpdateHelper helper(plr);
-            helper.Update(t_diff);
+            Player* plr = m_mapRefIter->getSource();
+            if (plr && plr->IsInWorld())
+            {
+                if (plr->GetPlayerbotAI() && !plr->GetPlayerbotAI()->IsRealPlayer())
+                    continue;
+
+                if (plr->isAFK())
+                    continue;
+
+                if (!plr->isGMVisible())
+                    continue;
+
+                if (find(m_activeZones.begin(), m_activeZones.end(), plr->GetZoneId()) == m_activeZones.end())
+                    m_activeZones.push_back(plr->GetZoneId());
+
+
+                WorldObject::UpdateHelper helper(plr);
+                helper.Update(t_diff);
+            }
         }
     }
 
-    /// update active cells around players and active objects
-    resetMarkedCells();
-
-    MaNGOS::ObjectUpdater updater(t_diff);
-    // for creature
-    TypeContainerVisitor<MaNGOS::ObjectUpdater, GridTypeMapContainer  > grid_object_update(updater);
-    // for pets
-    TypeContainerVisitor<MaNGOS::ObjectUpdater, WorldTypeMapContainer > world_object_update(updater);
-
+    bool hasPlayers = false;
+    uint32 activeChars = 0;
+    uint32 avgDiff = sWorld.GetAverageDiff();
+    bool updateAI = urand(0, (HasRealPlayers() ? avgDiff : (avgDiff * 3))) < 10;
+   
     // the player iterator is stored in the map object
     // to make sure calls to Map::Remove don't invalidate it
     for (m_mapRefIter = m_mapRefManager.begin(); m_mapRefIter != m_mapRefManager.end(); ++m_mapRefIter)
     {
         Player* plr = m_mapRefIter->getSource();
 
-        if (!plr->IsInWorld() || !plr->IsPositionValid())
+        if (!plr || !plr->IsInWorld() || !plr->IsPositionValid())
         {
             continue;
         }
+
+        bool isInActiveArea = false;
+        if (!plr->GetPlayerbotAI() || plr->GetPlayerbotAI()->IsRealPlayer())
+        {
+            isInActiveArea = true;
+            hasPlayers = true;
+        }
+        if (plr->GetPlayerbotAI() && plr->GetPlayerbotAI()->HasRealPlayerMaster())
+            isInActiveArea = true;
+        if (plr->InBattleGroundQueue() || plr->InBattleGround())
+            isInActiveArea = true;
+
+        if (isInActiveArea)
+            activeChars++;
+
+        plr->Update(t_diff);
+        plr->UpdateAI(t_diff, !(isInActiveArea || updateAI || plr->IsInCombat()));
 
         // lets update mobs/objects in ALL visible cells around player!
         CellArea area = Cell::CalculateCellArea(plr->GetPositionX(), plr->GetPositionY(), GetVisibilityDistance());
@@ -658,7 +719,12 @@ void Map::Update(const uint32& t_diff)
     }
 
     // Send world objects and item update field changes
-    SendObjectUpdates();
+    m_clientUpdateTimer += t_diff;
+    if (m_clientUpdateTimer >= 333)
+    {
+        m_clientUpdateTimer -= 333;
+        SendObjectUpdates();
+    }
 
     // Don't unload grids if it's battleground, since we may have manually added GOs,creatures, those doesn't load from DB at grid re-load !
     // This isn't really bother us, since as soon as we have instanced BG-s, the whole map unloads as the BG gets ended
@@ -764,7 +830,9 @@ void Map::Remove(Player* player, bool remove)
     SendRemoveTransports(player);
     UpdateObjectVisibility(player, cell, p);
 
-    player->ResetMap();
+    if (!player->GetPlayerbotAI()){
+        player->ResetMap();
+    }
     if (remove)
     {
         DeleteFromWorld(player);
@@ -1057,7 +1125,12 @@ void Map::UpdateObjectVisibility(WorldObject* obj, Cell cell, CellPair cellpair)
     MaNGOS::VisibleChangesNotifier notifier(*obj);
     TypeContainerVisitor<MaNGOS::VisibleChangesNotifier, WorldTypeMapContainer > player_notifier(notifier);
     cell.Visit(cellpair, player_notifier, *this, *obj, GetVisibilityDistance());
-}
+
+//     for (auto guid : notifier.GetUnvisitedGuids()) // FUN
+//         if (Player* player = GetPlayer(guid))
+//             if (player->isRealPlayer())
+//                 player->UpdateVisibilityOf(player->GetCamera().GetBody(), obj);
+// }
 
 void Map::SendInitSelf(Player* player)
 {

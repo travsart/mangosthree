@@ -410,7 +410,7 @@ void WorldSession::HandlePetitionSignOpcode(WorldPacket& recv_data)
     // not allow sign another player from already sign player account
     result = CharacterDatabase.PQuery("SELECT `playerguid`, `petitionguid` FROM `petition_sign` WHERE `player_account` = '%u'", GetAccountId());
 
-    if (result)
+    if (result && !_player->GetPlayerbotAI())
     {
         fields = result->Fetch();
         ObjectGuid playerGuid = ObjectGuid(HIGHGUID_PLAYER, fields[0].GetUInt32());

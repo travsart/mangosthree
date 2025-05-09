@@ -2336,7 +2336,9 @@ struct WorldObjectChangeAccumulator
         // with new camera system when player's camera too far from player, camera wouldn't receive packets and changes from player
         if (i_object.isType(TYPEMASK_PLAYER))
         {
-            i_object.BuildUpdateDataForPlayer((Player*)&i_object, i_updateDatas);
+            if(((Player*)&i_object)->isRealPlayer()) {
+                i_object.BuildUpdateDataForPlayer((Player*)&i_object, i_updateDatas);
+            }
         }
     }
 
@@ -2345,7 +2347,7 @@ struct WorldObjectChangeAccumulator
         for (CameraMapType::iterator iter = m.begin(); iter != m.end(); ++iter)
         {
             Player* owner = iter->getSource()->GetOwner();
-            if (owner != &i_object && owner->HaveAtClient(&i_object))
+            if (owner != &i_object && owner->isRealPlayer() && owner->HasAtClient(&i_object)))
             {
                 i_object.BuildUpdateDataForPlayer(owner, i_updateDatas);
             }

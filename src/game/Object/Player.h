@@ -63,6 +63,8 @@ class PlayerSocial;
 class DungeonPersistentState;
 class Spell;
 class Item;
+class PlayerbotAI;
+class PlayerbotMgr;
 
 struct AreaTrigger;
 
@@ -2081,6 +2083,8 @@ class Player : public Unit
         // Load the player from the database
         bool LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder);
 
+        bool MinimalLoadFromDB(std::unique_ptr<QueryResult> result, uint32 guid);
+
         // Get the zone ID from the database
         static uint32 GetZoneIdFromDB(ObjectGuid guid);
 
@@ -3819,6 +3823,18 @@ class Player : public Unit
         // Check if the player can see a spell click on a creature
         bool canSeeSpellClickOn(Creature const* creature) const;
 
+        // A Player can either have a playerbotMgr (to manage its bots), or have playerbotAI (if it is a bot), or
+        // neither. Code that enables bots must create the playerbotMgr and set it using SetPlayerbotMgr.
+        void UpdateAI(const uint32 diff, bool minimal = false);
+        void CreatePlayerbotAI();
+        void RemovePlayerbotAI();
+        PlayerbotAI* GetPlayerbotAI() { return m_playerbotAI.get(); }
+        void CreatePlayerbotMgr();
+        void RemovePlayerbotMgr();
+        PlayerbotMgr* GetPlayerbotMgr() { return m_playerbotMgr.get(); }
+        void SetBotDeathTimer() { m_deathTimer = 0; }
+        bool isRealPlayer() { return m_session && (m_session->GetRemoteAddress() != "disconnected/bot"); }
+
         // function used for raise ally spell
         bool IsGhouled() const { return m_isGhouled; }
         void SetGhouled(bool enable) { m_isGhouled = enable; }
@@ -4183,6 +4199,9 @@ class Player : public Unit
 
         // Map reference for the player
         MapReference m_mapRef;
+
+        std::unique_ptr<PlayerbotAI> m_playerbotAI;
+        std::unique_ptr<PlayerbotMgr> m_playerbotMgr;
 
         // Homebind coordinates
         uint32 m_homebindMapId; // Map ID of the homebind location

@@ -231,7 +231,7 @@ class Map : public GridRefManager<NGridType>
         bool HavePlayers() const { return !m_mapRefManager.isEmpty(); }
         uint32 GetPlayersCountExceptGMs() const;
         bool ActiveObjectsNearGrid(uint32 x, uint32 y) const;
-
+        bool HasRealPlayers() { return hasRealPlayers; }
         /// Send a Packet to all players on a map
         void SendToPlayers(WorldPacket const* data) const;
         /// Send a Packet to all players in a zone. Return false if no player found
@@ -376,6 +376,7 @@ class Map : public GridRefManager<NGridType>
         uint32 i_id;
         uint32 i_InstanceId;
         uint32 m_unloadTimer;
+        uint32 m_clientUpdateTimer;
         float m_VisibleDistance;
         MapPersistentState* m_persistentState;
 
@@ -427,6 +428,12 @@ class Map : public GridRefManager<NGridType>
 
         // WeatherSystem
         WeatherSystem* m_weatherSystem;
+
+        // spawning
+        // SpawnManager m_spawnManager;
+        std::vector<uint32> m_activeZones;
+        uint32 m_activeAreasTimer;
+        bool hasRealPlayers;
 
 #ifdef ENABLE_ELUNA
         Eluna* eluna;
